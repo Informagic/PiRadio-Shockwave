@@ -49,6 +49,8 @@ wundergroundStations = [['Lisboa', '38.728577,-9.132745']]#,
 lastWeatherUpdateTime = 0
 weatherInfo = []
 
+systemOptions = ['Shutdown', 'Reboot', 'WiFi Scan']
+
 # Global state:
 volCur       = VOL_MIN     # Current volume
 volNew       = VOL_DEFAULT # 'Next' volume after interactions
@@ -59,6 +61,7 @@ menuSel      = False
 staSel       = False       # True if selecting station
 userSel      = False
 weatherSel   = False
+systemSel    = False
 volTime      = 0           # Time of last volume button interaction
 playMsgTime  = 0           # Time of last 'Playing' message display
 staBtnTime   = 0           # Time of last button press on station menu
@@ -77,6 +80,7 @@ menuNew     = 0
 userNum     = 0
 userNew     = 0
 weatherNew  = 0
+systemNew   = 0
 stationList = ['']
 stationIDs  = ['']
 currentInfoString = ''
@@ -127,7 +131,8 @@ userFiles = ['/home/pi/InternetRadio/wifi_stations_Andreas.csv',
 mainMenu  = ['Pause/Play',
              'Radio Stations',
              'Users',
-             'Wheather Info']
+             'Weather Info',
+             'System Settings']
 
 mpc_stop   = ['mpc', 'stop']
 mpc_play   = ['mpc', 'play']
@@ -178,6 +183,40 @@ def shutdown():
         subprocess.call(["shutdown", "-h", "now"])
     else:
         exit(0)
+
+
+def reboot():
+    lcd.clear()
+    if HALT_ON_EXIT:
+        if RGB_LCD: lcd.backlight(lcd.YELLOW)
+        lcd.message('Do not unplug,\nsystem reboots!')
+        # Ramp down volume over 5 seconds while 'wait' message shows
+        steps = int((volCur - VOL_MIN) + 0.5) + 1
+        pause = 5.0 / steps
+        for i in range(steps):
+            run_cmd(mpc_voldn)
+            time.sleep(pause)
+        subprocess.call("sync") # write any outstanding buffers to disk
+        subprocess.call(["reboot"])
+    else:
+        exit(0)
+
+
+def wirelessInitialize():
+    lcd.clear()
+    if RGB_LCD: lcd.backlight(lcd.YELLOW)
+    lcd.message('Re-initializing\nWiFi')
+    # Ramp down volume over 5 seconds while 'wait' message shows
+    steps = int((volCur - VOL_MIN) + 0.5) + 1
+    pause = 5.0 / steps
+    for i in range(steps):
+        run_cmd(mpc_voldn)
+        time.sleep(pause)
+    subprocess.call(["ifdown", "--force", "wlan0"])
+    subprocess.call(["ifup", "wlan0"])
+    python = sys.executable
+    os.execl(python, python, * sys.argv)
+
 
 
 def updateWeatherInfo(lastTime):
@@ -320,6 +359,114 @@ def getStations():
     file.close()
     return names, addresses
 
+def mainMenuNavigation():
+    global mainMenu, stationList, userNames, weatherInfo, systemOptions
+    global menuNew, stationNew, userNew, weatherNew, systemNew
+    global stationNum, userNum
+    global cursorY, listTop, xStation, staBtnTime
+    global paused, menuSel, staSel, userSel, weatherSel, systemSel
+    menuNum = menuNew
+    if mainMenu[menuNum] == "Pause/Play":
+        paused = not paused
+        run_cmd(mpc_toggle)
+        if paused:
+            drawPaused() #  Display play/pause change
+        else:
+            playMsgTime = drawPlaying()
+        menuSel    = False
+        staSel     = False
+        userSel    = False
+        weatherSel = False
+        systemSel  = False
+    elif mainMenu[menuNum] == "Radio Stations":
+        if not staSel:
+            staSel = True
+            # Entering station selection menu.  Don't return to volume
+            # select, regardless of outcome, just return to normal play.
+            lcd.createChar(7, charSevenBitmaps[0])
+            cursorY    = 0 # Cursor position on screen
+            stationNew = 0 # Cursor position in list
+            listTop    = 0 # Top of list on screen
+            xStation   = 0 # X scrolling for long station names
+            staBtnTime = time.time()
+            drawChoiceList(stationList, stationNew, listTop, 0, staBtnTime)
+        else:
+            # Just exited station menu with selection - go play.
+            stationNum = stationNew # Make menu selection permanent
+            print('Selecting station: "{}"'.format(stationIDs[stationNum]))
+            run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
+            paused = False
+            menuSel    = False
+            staSel     = False
+            userSel    = False
+            weatherSel = False
+            systemSel  = False
+    elif mainMenu[menuNum] == "Users":
+        if not userSel:
+            userSel = True
+            lcd.createChar(7, charSevenBitmaps[0])
+            cursorY     = 0 # Cursor position on screen
+            userNew     = 0 # Cursor position in list
+            listTop     = 0 # Top of list on screen
+            xStation    = 0 # X scrolling for long station names
+            staBtnTime = time.time()
+            drawChoiceList(userNames, userNew, listTop, 0, staBtnTime)
+        else:
+            # Just exited user menu with selection - go play.
+            userNum = userNew # Make menu selection permanent
+            print('Selecting user: "{}"'.format(userNames[userNum]))
+            run_cmd(mpc_stop)
+            print(stationIDs[0])
+            stationList, stationIDs = getStations()
+            stationNum = 0
+            print(stationIDs[stationNum])
+            run_cmd(mpc_play)
+            paused = False
+            menuSel    = False
+            staSel     = False
+            userSel    = False
+            weatherSel = False
+            systemSel  = False
+    elif mainMenu[menuNum] == 'Weather Info':
+        if not weatherSel:
+            weatherSel = True
+            lcd.createChar(7, charSevenBitmaps[0])
+            cursorY     = 0 # Cursor position on screen
+            weatherNew  = 0 # Cursor position in list
+            listTop     = 0 # Top of list on screen
+            xStation    = 0 # X scrolling for long station names
+            staBtnTime = time.time()
+            drawChoiceList(weatherInfo, weatherNew, listTop, 0, staBtnTime)
+        else: # we just want to go back into play mode
+            paused = False
+            menuSel    = False
+            staSel     = False
+            userSel    = False
+            weatherSel = False
+            systemSel  = False
+    elif mainMenu[menuNum] == 'System Settings':
+        if not systemSel:
+            systemSel = True
+            lcd.createChar(7, charSevenBitmaps[0])
+            cursorY    = 0 # Cursor position on screen
+            systemNew  = 0 # Cursor position in list
+            listTop    = 0 # Top of list on screen
+            xStation   = 0 # X scrolling for long station names
+            staBtnTime = time.time()
+            drawChoiceList(systemOptions, systemNew, listTop, 0, staBtnTime)
+        else: # we just want to go back into play mode
+            if systemOptions[systemNew] == 'Shutdown':
+                shutdown()
+            elif systemOptions[systemNew] == 'Reboot':
+                reboot()
+            elif systemOptions[systemNew] == 'WiFi Scan':
+                resetWiFi()
+            paused = False
+            menuSel    = False
+            staSel     = False
+            userSel    = False
+            weatherSel = False
+            systemSel  = False
 
 # --------------------------------------------------------------------------
 # Initialization
@@ -404,6 +551,7 @@ except: # Use first station in list
     stationNum = 0
 print('Selecting station ' + stationIDs[stationNum])
 run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
+
 
 # --------------------------------------------------------------------------
 # Main loop.  This is not quite a straight-up state machine; there's some
@@ -502,105 +650,56 @@ while True:
             staBtnTime  = time.time()
             drawChoiceList(mainMenu, menuNew, listTop, 0, staBtnTime)
         else:
-            menuNum = menuNew
-            if mainMenu[menuNum] == "Pause/Play":
-                paused = not paused
-                run_cmd(mpc_toggle)
-                if paused:
-                    drawPaused() #  Display play/pause change
-                else:
-                    playMsgTime = drawPlaying()
-                menuSel    = False
-                staSel     = False
-                userSel    = False
-                weatherSel = False
-            elif mainMenu[menuNum] == "Radio Stations":
-                if not staSel:
-                    staSel = True
-                    # Entering station selection menu.  Don't return to volume
-                    # select, regardless of outcome, just return to normal play.
-                    lcd.createChar(7, charSevenBitmaps[0])
-                    cursorY    = 0 # Cursor position on screen
-                    stationNew = 0 # Cursor position in list
-                    listTop    = 0 # Top of list on screen
-                    xStation   = 0 # X scrolling for long station names
-                    staBtnTime = time.time()
-                    drawChoiceList(stationList, stationNew, listTop, 0, staBtnTime)
-                else:
-                    # Just exited station menu with selection - go play.
-                    stationNum = stationNew # Make menu selection permanent
-                    print('Selecting station: "{}"'.format(stationIDs[stationNum]))
-                    run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
-                    paused = False
-                    menuSel    = False
-                    staSel     = False
-                    userSel    = False
-                    weatherSel = False
-            elif mainMenu[menuNum] == "Users":
-                if not userSel:
-                    userSel = True
-                    lcd.createChar(7, charSevenBitmaps[0])
-                    cursorY     = 0 # Cursor position on screen
-                    userNew     = 0 # Cursor position in list
-                    listTop     = 0 # Top of list on screen
-                    xStation    = 0 # X scrolling for long station names
-                    staBtnTime = time.time()
-                    drawChoiceList(userNames, userNew, listTop, 0, staBtnTime)
-                else:
-                    # Just exited user menu with selection - go play.
-                    userNum = userNew # Make menu selection permanent
-                    print('Selecting user: "{}"'.format(userNames[userNum]))
-                    run_cmd(mpc_stop)
-                    print(stationIDs[0])
-                    stationList, stationIDs = getStations()
-                    stationNum = 0
-                    print(stationIDs[stationNum])
-                    run_cmd(mpc_play)
-                    paused = False
-                    menuSel    = False
-                    staSel     = False
-                    userSel    = False
-                    weatherSel = False
-            elif mainMenu[menuNum] == 'Weather Info':
-                if not weatherSel:
-                    weatherSel = True
-                    lcd.createChar(7, charSevenBitmaps[0])
-                    cursorY     = 0 # Cursor position on screen
-                    weatherNew  = 0 # Cursor position in list
-                    listTop     = 0 # Top of list on screen
-                    xStation    = 0 # X scrolling for long station names
-                    staBtnTime = time.time()
-                    drawChoiceList(weatherInfo, weatherNew, listTop, 0, staBtnTime)
-                else: # we just want to go back into play mode
-                    paused = False
-                    menuSel    = False
-                    staSel     = False
-                    userSel    = False
-                    weatherSel = False
-
+            mainMenuNavigation()
 
     elif btnRight:
-        drawNextTrack()
-        stationNum = (stationNum + 1) % len(stationIDs)
-        run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
-        lcd.setCursor(0, 0)
-        shortStation = stationList[stationNum][0:15]
-        shortStation = shortStation + ' ' * (16 - len(shortStation))
-        lcd.message(shortStation)
-        time.sleep(1.0)
+        if not menuSel and not staSel and not userSel and not weatherSel and not systemSel:
+            drawNextTrack()
+            stationNum = (stationNum + 1) % len(stationIDs)
+            run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
+            lcd.setCursor(0, 0)
+            shortStation = stationList[stationNum][0:15]
+            shortStation = shortStation + ' ' * (16 - len(shortStation))
+            lcd.message(shortStation)
+            time.sleep(1.0)
+        elif menuSel and not staSel and not userSel and not weatherSel and not systemSel:
+            # if we are in menu mode, we want the right button to perform the "select" action
+            # (just like the select button does it)
+            mainMenuNavigation()
 
     elif btnLeft:
-        drawPrevTrack()
-        stationNum = (stationNum - 1) % len(stationIDs)
-        run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
-        lcd.setCursor(0, 0)
-        shortStation = stationList[stationNum][0:15]
-        shortStation = shortStation + ' ' * (16 - len(shortStation))
-        lcd.message(shortStation)
-        time.sleep(1.0)
+        if not menuSel and not staSel and not userSel and not weatherSel and not systemSel:
+            drawPrevTrack()
+            stationNum = (stationNum - 1) % len(stationIDs)
+            run_cmd(mpc_play + ["{0}".format(stationNum + 1)])
+            lcd.setCursor(0, 0)
+            shortStation = stationList[stationNum][0:15]
+            shortStation = shortStation + ' ' * (16 - len(shortStation))
+            lcd.message(shortStation)
+            time.sleep(1.0)
+        elif menuSel:
+            # if we are in menu mode, we want the left button to perform a "go back" action
+            staSel     = False
+            userSel    = False
+            weatherSel = False
+            systemSel  = False
+            if not staSel and not userSel and not weatherSel and not systemSel:
+                # go back to "play" mode
+                paused = False
+                menuSel = False
+            if staSel or userSel or weatherSel or systemSel:
+                # go back to the main menu by simulating a "select button" press
+                lcd.createChar(7, charSevenBitmaps[0])
+                volSet      = False
+                cursorY     = 0 # Cursor position on screen
+                menuNew     = 0 # Cursor position in list
+                listTop     = 0 # Top of list on screen
+                xStation    = 0 # X scrolling for long station names
+                staBtnTime  = time.time()
+                drawChoiceList(mainMenu, menuNew, listTop, 0, staBtnTime)
 
     elif btnUp or btnDown:
-        if menuSel and not staSel and not userSel and not weatherSel:
+        if menuSel and not staSel and not userSel and not weatherSel and not systemSel:
             # Move up or down main menu
             if btnDown:
                 if menuNew < (len(mainMenu) - 1):
@@ -660,6 +759,21 @@ while True:
                     xStation = 0                 # Reset X-scroll
             staBtnTime = time.time()             # Reset button time
             xStation = drawChoiceList(weatherInfo, weatherNew, listTop, 0, staBtnTime)
+        elif systemSel:
+            # Move up or down system config menu
+            if btnDown:
+                if systemNew < (len(systemOptions) - 1):
+                    systemNew += 1               # Next user
+                    if cursorY < 1: cursorY += 1 # Move cursor
+                    else:           listTop += 1 # Y-scroll
+                    xStation = 0                 # Reset X-scroll
+            elif systemNew > 0:                  # btnUp implied
+                    systemNew -= 1               # Prev user
+                    if cursorY > 0: cursorY -= 1 # Move cursor
+                    else:           listTop -= 1 # Y-scroll
+                    xStation = 0                 # Reset X-scroll
+            staBtnTime = time.time()             # Reset button time
+            xStation = drawChoiceList(systemOptions, systemNew, listTop, 0, staBtnTime)
         else:
             if volSet is False:
                 # Just entering volume-setting mode; init display
