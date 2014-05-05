@@ -360,7 +360,7 @@ def getStations():
     return names, addresses
 
 def mainMenuNavigation():
-    global mainMenu, stationList, userNames, weatherInfo, systemOptions
+    global mainMenu, stationList, stationIDs, userNames, weatherInfo, systemOptions
     global menuNew, stationNew, userNew, weatherNew, systemNew
     global stationNum, userNum
     global cursorY, listTop, xStation, staBtnTime
